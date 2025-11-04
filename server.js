@@ -68,6 +68,11 @@ function verifyInitData(initDataRaw) {
 
   return { ok: true, user, params: Object.fromEntries(entries) };
 }
+// Тест: простая проверка, что фронт достаётся до бэка
+app.get('/api/ping-test', (req, res) => {
+  console.log('🛰  ping-test', new Date().toISOString(), req.query);
+  res.json({ ok: true, when: new Date().toISOString(), from: req.query.from || 'unknown' });
+});
 
 // ---------- Роуты ----------
 
