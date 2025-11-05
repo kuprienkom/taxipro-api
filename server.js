@@ -147,6 +147,16 @@ app.post('/api/ping', async (req, res) => {
     res.status(500).json({ error: 'ping_failed' });
   }
 });
+// --- TaxiPro · stub /api/shifts (временная заглушка, без БД)
+app.post('/api/shifts', (req, res) => {
+  res.json({
+    ok: true,
+    stub: true,
+    received: req.body || null,
+    ts: Date.now()
+  });
+});
+
 
 // ---------- Запуск сервера ----------
 const PORT = process.env.PORT || 3000;
