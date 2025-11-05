@@ -32,20 +32,20 @@ const Presence = mongoose.model('Presence', new mongoose.Schema({
   tgId: { type: Number, unique: true, index: true },
   last_seen: { type: Date, default: Date.now }
 }));
-// >>> добавленный индекс для быстрого поиска по last_seen
 Presence.schema.index({ last_seen: -1 });
 
-// === TaxiPro · Shift model (вставка ПЕРЕД маршрутами) ===
+// === TaxiPro · Shift model (с учётом машины) ===
 const Shift = mongoose.model('Shift', new mongoose.Schema({
-  tgId: { type: Number, required: true, index: true },
-  date: { type: String, required: true },        // YYYY-MM-DD
-  payload: { type: Object, default: {} },        // данные смены
-  updatedAt: { type: Date, default: Date.now },
+  tgId:  { type: Number, required: true, index: true },
+  carId: { type: String, required: true, index: true }, // <-- добавили carId
+  date:  { type: String, required: true },              // YYYY-MM-DD
+  payload:  { type: Object, default: {} },
+  updatedAt:{ type: Date, default: Date.now },
 }, { versionKey: false }));
-Shift.schema.index({ tgId: 1, date: 1 }, { unique: true }); // уникальная смена на дату
+Shift.schema.index({ tgId: 1, carId: 1, date: 1 }, { unique: true });
 // === /Shift model ===
 
-// Синхронизируем индексы после установления соединения с Mongo
+// Синхронизация индексов
 mongoose.connection.once('open', async () => {
   try {
     await Presence.syncIndexes();
@@ -57,80 +57,44 @@ mongoose.connection.once('open', async () => {
   }
 });
 
-// ---------- Валидация initData (официальный алгоритм) ----------
+// ---------- Валидация initData ----------
 function verifyInitData(initDataRaw) {
   if (!initDataRaw) return { ok: false, error: 'no_init_data' };
-
   const urlParams = new URLSearchParams(initDataRaw);
   const hash = urlParams.get('hash');
   if (!hash) return { ok: false, error: 'no_hash' };
-
-  // Строка для подписи: все пары, кроме hash, по алфавиту
   urlParams.delete('hash');
   const entries = Array.from(urlParams.entries()).sort(([a], [b]) => a.localeCompare(b));
   const dataCheckString = entries.map(([k, v]) => `${k}=${v}`).join('\n');
-
-  // secret_key = HMAC_SHA256(bot_token, "WebAppData")
   const botToken = process.env.BOT_TOKEN || '';
   if (!botToken) return { ok: false, error: 'no_bot_token' };
-
   const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
   const calc = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
   if (calc !== hash) return { ok: false, error: 'bad_hash' };
-
-  // Доп. защита по времени
   const authDate = Number(urlParams.get('auth_date') || 0);
   const now = Math.floor(Date.now() / 1000);
   if (!authDate || now - authDate > 300) return { ok: false, error: 'stale_auth' };
-
-  // user приходит как JSON-строка
   let user = null;
-  try {
-    user = JSON.parse(urlParams.get('user'));
-  } catch {
-    return { ok: false, error: 'bad_user_json' };
-  }
-
+  try { user = JSON.parse(urlParams.get('user')); } catch { return { ok: false, error: 'bad_user_json' }; }
   return { ok: true, user, params: Object.fromEntries(entries) };
 }
 
 // ---------- Роуты ----------
-
-// Healthcheck
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-// Авторизация/апсерт пользователя (при первом заходе мини-апки)
 app.post('/api/auth/telegram', async (req, res) => {
   try {
     const { initData } = req.body;
     const check = verifyInitData(initData);
     if (!check.ok) return res.status(403).json({ error: check.error });
-
-    const u = check.user; // { id, username, first_name, ... }
+    const u = check.user;
     console.log('🔐 AUTH hit', u.id, u.username || u.first_name || '');
-
-    // апсерт пользователя
     await User.updateOne(
       { tgId: u.id },
-      {
-        $set: {
-          username: u.username ?? null,
-          first_name: u.first_name ?? null,
-          last_name: u.last_name ?? null,
-          language_code: u.language_code ?? null,
-          photo_url: u.photo_url ?? null,
-        }
-      },
+      { $set: { username: u.username ?? null, first_name: u.first_name ?? null, last_name: u.last_name ?? null, language_code: u.language_code ?? null, photo_url: u.photo_url ?? null } },
       { upsert: true }
     );
-
-    // заодно отметим активность
-    await Presence.updateOne(
-      { tgId: u.id },
-      { $set: { last_seen: new Date() } },
-      { upsert: true }
-    );
-
+    await Presence.updateOne({ tgId: u.id }, { $set: { last_seen: new Date() } }, { upsert: true });
     res.json({ status: 'ok', userId: u.id });
   } catch (e) {
     console.error('❌ /api/auth/telegram error:', e);
@@ -138,19 +102,13 @@ app.post('/api/auth/telegram', async (req, res) => {
   }
 });
 
-// Пинг активности (каждые 30 сек из клиента)
 app.post('/api/ping', async (req, res) => {
   try {
     const { initData, screen } = req.body;
     const check = verifyInitData(initData);
     if (!check.ok) return res.status(403).json({ error: check.error });
-
     const { id } = check.user;
-    await Presence.updateOne(
-      { tgId: id },
-      { $set: { last_seen: new Date() } },
-      { upsert: true }
-    );
+    await Presence.updateOne({ tgId: id }, { $set: { last_seen: new Date() } }, { upsert: true });
     console.log('👀 ping', { tgId: id, screen: screen || 'unknown' });
     res.json({ status: 'ok' });
   } catch (e) {
@@ -159,7 +117,7 @@ app.post('/api/ping', async (req, res) => {
   }
 });
 
-// --- TaxiPro · /api/shifts (upsert в Mongo; ЗАМЕНА заглушки)
+// --- POST /api/shifts (апсерт по tgId+carId+date)
 app.post('/api/shifts', async (req, res) => {
   try {
     const initDataHeader = req.header('X-Telegram-Init-Data');
@@ -168,22 +126,24 @@ app.post('/api/shifts', async (req, res) => {
     if (!check.ok) return res.status(401).json({ ok: false, error: check.error });
 
     const tgId = Number(check.user.id);
-    const { date, payload } = req.body || {};
-    if (!date) return res.status(400).json({ ok: false, error: 'DATE_REQUIRED' });
+    const { carId, date, payload } = req.body || {};
+    if (!carId) return res.status(400).json({ ok:false, error:'CAR_ID_REQUIRED' });
+    if (!date)  return res.status(400).json({ ok:false, error:'DATE_REQUIRED' });
 
     const row = await Shift.findOneAndUpdate(
-      { tgId, date },
+      { tgId, carId, date },
       { $set: { payload: payload ?? {}, updatedAt: new Date() } },
       { new: true, upsert: true }
     ).lean();
 
     return res.json({ ok: true, row });
   } catch (e) {
-    console.error('❌ /api/shifts upsert error:', e);
-    return res.status(500).json({ ok: false, error: 'UPSERT_FAILED' });
+    console.error('❌ /api/shifts upsert error', e);
+    return res.status(500).json({ ok:false, error:'UPSERT_FAILED' });
   }
 });
-// --- TaxiPro · GET /api/shifts — выборка по диапазону дат (оба параметра опциональны)
+
+// --- GET /api/shifts (фильтр по дате и опционально carId)
 app.get('/api/shifts', async (req, res) => {
   try {
     const initDataHeader = req.header('X-Telegram-Init-Data');
@@ -192,16 +152,17 @@ app.get('/api/shifts', async (req, res) => {
     if (!check.ok) return res.status(401).json({ ok: false, error: check.error });
 
     const tgId = Number(check.user.id);
-    const { from, to } = req.query || {};
+    const { from, to, carId } = req.query || {};
 
     const q = { tgId };
+    if (carId) q.carId = String(carId);
     if (from || to) {
       q.date = {};
       if (from) q.date.$gte = from;
       if (to)   q.date.$lte = to;
     }
 
-    const rows = await mongoose.model('Shift').find(q).lean();
+    const rows = await Shift.find(q).lean();
     res.json({ ok: true, rows });
   } catch (e) {
     console.error('❌ /api/shifts get error', e);
