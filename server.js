@@ -14,7 +14,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'X-Telegram-Init-Data'],
   methods: ['GET','POST','PUT','DELETE','OPTIONS']
 }));
-app.use(express.json());
+app.use(express.json({ limit: '256kb' }));
 
 // ---------- MongoDB ----------
 if (!process.env.MONGODB_URI) {
@@ -226,16 +226,18 @@ app.post('/api/shifts/bulk', async (req, res) => {
         }
         const row = await Shift.findOneAndUpdate(
           { tgId, carId, date },
-          { $set: {
-            payload: payload ?? {},
-            updatedAt: new Date(),
-            ...(carName ? { carName } : {}),
-            ...(carClass ? { carClass } : {}),
-          }},
+          {
+            $set: {
+              payload: payload ?? {},
+              updatedAt: new Date(),
+              ...(carName ? { carName } : {}),
+              ...(carClass ? { carClass } : {}),
+            },
+          },
           { new: true, upsert: true }
         ).lean();
         results.push({ idx, ok: true, _id: row?._id });
-      } catch (e) {
+      } catch {
         results.push({ idx, ok: false, error: 'UPSERT_FAILED' });
       }
     }
@@ -245,6 +247,7 @@ app.post('/api/shifts/bulk', async (req, res) => {
     res.status(500).json({ ok: false, error: 'BULK_FAILED' });
   }
 });
+
 
 // Listing
 app.get('/api/shifts', async (req, res) => {
