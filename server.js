@@ -18,7 +18,7 @@ if (!process.env.MONGODB_URI) {
     .catch(err => console.error('❌ Mongo error:', err));
 }
 
-// Модели
+// ---------- Models ----------
 const User = mongoose.model('User', new mongoose.Schema({
   tgId: { type: Number, unique: true, index: true },
   username: String,
@@ -34,13 +34,15 @@ const Presence = mongoose.model('Presence', new mongoose.Schema({
 }));
 Presence.schema.index({ last_seen: -1 });
 
-// === TaxiPro · Shift model (с учётом машины) ===
+// === TaxiPro · Shift model (с учётом машины + снапшот названия) ===
 const Shift = mongoose.model('Shift', new mongoose.Schema({
-  tgId:  { type: Number, required: true, index: true },
-  carId: { type: String, required: true, index: true }, // <-- добавили carId
-  date:  { type: String, required: true },              // YYYY-MM-DD
-  payload:  { type: Object, default: {} },
-  updatedAt:{ type: Date, default: Date.now },
+  tgId:    { type: Number, required: true, index: true },
+  carId:   { type: String, required: true, index: true },
+  date:    { type: String, required: true },            // YYYY-MM-DD (нормализуем)
+  carName: { type: String, default: null },             // снапшот
+  carClass:{ type: String, default: null },             // снапшот
+  payload: { type: Object, default: {} },
+  updatedAt: { type: Date, default: Date.now },
 }, { versionKey: false }));
 Shift.schema.index({ tgId: 1, carId: 1, date: 1 }, { unique: true });
 // === /Shift model ===
@@ -56,6 +58,12 @@ mongoose.connection.once('open', async () => {
     console.error('❌ Index sync error:', e);
   }
 });
+
+// ---------- Helpers ----------
+function normISO(d) {
+  try { return new Date(d).toISOString().slice(0,10); }
+  catch { return String(d).slice(0,10); }
+}
 
 // ---------- Валидация initData ----------
 function verifyInitData(initDataRaw) {
@@ -79,7 +87,7 @@ function verifyInitData(initDataRaw) {
   return { ok: true, user, params: Object.fromEntries(entries) };
 }
 
-// ---------- Роуты ----------
+// ---------- Routes ----------
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 app.post('/api/auth/telegram', async (req, res) => {
@@ -117,7 +125,7 @@ app.post('/api/ping', async (req, res) => {
   }
 });
 
-// --- POST /api/shifts (апсерт по tgId+carId+date)
+// --- POST /api/shifts (апсерт по tgId+carId+date) ---
 app.post('/api/shifts', async (req, res) => {
   try {
     const initDataHeader = req.header('X-Telegram-Init-Data');
@@ -126,13 +134,15 @@ app.post('/api/shifts', async (req, res) => {
     if (!check.ok) return res.status(401).json({ ok: false, error: check.error });
 
     const tgId = Number(check.user.id);
-    const { carId, date, payload } = req.body || {};
+    const { carId, date, payload, carName, carClass } = req.body || {};
     if (!carId) return res.status(400).json({ ok:false, error:'CAR_ID_REQUIRED' });
     if (!date)  return res.status(400).json({ ok:false, error:'DATE_REQUIRED' });
 
+    const dateISO = normISO(date);
+
     const row = await Shift.findOneAndUpdate(
-      { tgId, carId, date },
-      { $set: { payload: payload ?? {}, updatedAt: new Date() } },
+      { tgId, carId, date: dateISO },
+      { $set: { payload: payload ?? {}, carName: carName ?? null, carClass: carClass ?? null, updatedAt: new Date() } },
       { new: true, upsert: true }
     ).lean();
 
@@ -143,7 +153,7 @@ app.post('/api/shifts', async (req, res) => {
   }
 });
 
-// --- GET /api/shifts (фильтр по дате и опционально carId)
+// --- GET /api/shifts (фильтр по дате, опционально carId) ---
 app.get('/api/shifts', async (req, res) => {
   try {
     const initDataHeader = req.header('X-Telegram-Init-Data');
@@ -158,11 +168,11 @@ app.get('/api/shifts', async (req, res) => {
     if (carId) q.carId = String(carId);
     if (from || to) {
       q.date = {};
-      if (from) q.date.$gte = from;
-      if (to)   q.date.$lte = to;
+      if (from) q.date.$gte = normISO(from);
+      if (to)   q.date.$lte = normISO(to);
     }
 
-    const rows = await Shift.find(q).lean();
+    const rows = await Shift.find(q).sort({ carName: 1, date: -1 }).lean();
     res.json({ ok: true, rows });
   } catch (e) {
     console.error('❌ /api/shifts get error', e);
@@ -170,7 +180,7 @@ app.get('/api/shifts', async (req, res) => {
   }
 });
 
-// ---------- Запуск сервера ----------
+// ---------- Start ----------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ API running on :${PORT}`);
