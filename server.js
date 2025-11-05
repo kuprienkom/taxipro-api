@@ -5,7 +5,8 @@ import crypto from 'crypto';
 import mongoose from 'mongoose';
 
 const app = express();
-app.use(cors());
+const ORIGINS = ['https://t.me', 'https://web.telegram.org', 'https://kuprienkom.github.io'];
+app.use(cors({ origin: ORIGINS }));
 app.use(express.json());
 
 // ---------- MongoDB ----------
@@ -31,6 +32,8 @@ const Presence = mongoose.model('Presence', new mongoose.Schema({
   tgId: { type: Number, unique: true, index: true },
   last_seen: { type: Date, default: Date.now }
 }));
+// >>> добавленный индекс для быстрого поиска по last_seen
+Presence.schema.index({ last_seen: -1 });
 
 // ---------- Валидация initData (официальный алгоритм) ----------
 function verifyInitData(initDataRaw) {
@@ -68,12 +71,6 @@ function verifyInitData(initDataRaw) {
 
   return { ok: true, user, params: Object.fromEntries(entries) };
 }
-// Тест: простая проверка, что фронт достаётся до бэка
-app.get('/api/ping-test', (req, res) => {
-  console.log('🛰  ping-test', new Date().toISOString(), req.query);
-  res.json({ ok: true, when: new Date().toISOString(), from: req.query.from || 'unknown' });
-});
-
 // ---------- Роуты ----------
 
 // Healthcheck (как в шаге 1)
