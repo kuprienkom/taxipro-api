@@ -183,6 +183,31 @@ app.post('/api/shifts', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'UPSERT_FAILED' });
   }
 });
+// --- TaxiPro · GET /api/shifts — выборка по диапазону дат (оба параметра опциональны)
+app.get('/api/shifts', async (req, res) => {
+  try {
+    const initDataHeader = req.header('X-Telegram-Init-Data');
+    const initData = initDataHeader || req.query?.initData || '';
+    const check = verifyInitData(initData);
+    if (!check.ok) return res.status(401).json({ ok: false, error: check.error });
+
+    const tgId = Number(check.user.id);
+    const { from, to } = req.query || {};
+
+    const q = { tgId };
+    if (from || to) {
+      q.date = {};
+      if (from) q.date.$gte = from;
+      if (to)   q.date.$lte = to;
+    }
+
+    const rows = await mongoose.model('Shift').find(q).lean();
+    res.json({ ok: true, rows });
+  } catch (e) {
+    console.error('❌ /api/shifts get error', e);
+    res.status(500).json({ ok: false, error: 'GET_FAILED' });
+  }
+});
 
 // ---------- Запуск сервера ----------
 const PORT = process.env.PORT || 3000;
