@@ -52,6 +52,8 @@ const Shift = mongoose.model('Shift', new mongoose.Schema({
   updatedAt:{ type: Date, default: Date.now },
 }, { versionKey: false }));
 Shift.schema.index({ tgId: 1, carId: 1, date: 1 }, { unique: true });
+Shift.schema.index({ tgId: 1, updatedAt: -1 });
+
 
 // ---------- Index sync ----------
 mongoose.connection.once('open', async () => {
@@ -236,7 +238,16 @@ app.post('/api/shifts/bulk', async (req, res) => {
           },
           { new: true, upsert: true }
         ).lean();
-        results.push({ idx, ok: true, _id: row?._id });
+        
+results.push({
+  idx,
+  ok: true,
+  _id: row?._id,
+  carId: row?.carId,
+  date: row?.date,
+  updatedAt: row?.updatedAt
+});
+
       } catch {
         results.push({ idx, ok: false, error: 'UPSERT_FAILED' });
       }
@@ -256,7 +267,7 @@ app.get('/api/shifts', async (req, res) => {
     if (!check.ok) return res.status(401).json({ ok: false, error: check.error });
 
     const tgId = Number(check.user.id);
-    const { from, to, carId } = req.query || {};
+    const { from, to, carId, updatedSince } = req.query || {};
 
     const q = { tgId };
     if (carId) q.carId = String(carId);
@@ -265,14 +276,22 @@ app.get('/api/shifts', async (req, res) => {
       if (from) q.date.$gte = from;
       if (to)   q.date.$lte = to;
     }
+    if (updatedSince) {
+      const since = new Date(updatedSince);
+      if (!isNaN(since.getTime())) {
+        q.updatedAt = { ...(q.updatedAt || {}), $gt: since };
+      }
+    }
 
     const rows = await Shift.find(q).sort({ date: 1 }).lean();
+    // rows уже содержат updatedAt
     res.json({ ok: true, rows });
   } catch (e) {
     console.error('❌ /api/shifts get error', e);
     res.status(500).json({ ok: false, error: 'GET_FAILED' });
   }
 });
+
 
 // CRUD by id (с проверкой владельца)
 app.get('/api/shifts/:id', async (req, res) => {
