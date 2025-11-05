@@ -34,6 +34,16 @@ const Presence = mongoose.model('Presence', new mongoose.Schema({
 }));
 // >>> добавленный индекс для быстрого поиска по last_seen
 Presence.schema.index({ last_seen: -1 });
+// Синхронизируем индексы после установления соединения с Mongo
+mongoose.connection.once('open', async () => {
+  try {
+    await Presence.syncIndexes();
+    console.log('🧭 Presence indexes synced');
+  } catch (e) {
+    console.error('❌ Presence index sync error:', e);
+  }
+});
+
 
 // ---------- Валидация initData (официальный алгоритм) ----------
 function verifyInitData(initDataRaw) {
@@ -84,6 +94,8 @@ app.post('/api/auth/telegram', async (req, res) => {
     if (!check.ok) return res.status(403).json({ error: check.error });
 
     const u = check.user; // { id, username, first_name, ... }
+    console.log('🔐 AUTH hit', u.id, u.username || u.first_name || '');
+
 
     // апсерт пользователя
     await User.updateOne(
