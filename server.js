@@ -34,16 +34,28 @@ const Presence = mongoose.model('Presence', new mongoose.Schema({
 }));
 // >>> добавленный индекс для быстрого поиска по last_seen
 Presence.schema.index({ last_seen: -1 });
+
+// === TaxiPro · Shift model (вставка ПЕРЕД маршрутами) ===
+const Shift = mongoose.model('Shift', new mongoose.Schema({
+  tgId: { type: Number, required: true, index: true },
+  date: { type: String, required: true },        // YYYY-MM-DD
+  payload: { type: Object, default: {} },        // данные смены
+  updatedAt: { type: Date, default: Date.now },
+}, { versionKey: false }));
+Shift.schema.index({ tgId: 1, date: 1 }, { unique: true }); // уникальная смена на дату
+// === /Shift model ===
+
 // Синхронизируем индексы после установления соединения с Mongo
 mongoose.connection.once('open', async () => {
   try {
     await Presence.syncIndexes();
+    await Shift.syncIndexes();
     console.log('🧭 Presence indexes synced');
+    console.log('🧭 Shift indexes synced');
   } catch (e) {
-    console.error('❌ Presence index sync error:', e);
+    console.error('❌ Index sync error:', e);
   }
 });
-
 
 // ---------- Валидация initData (официальный алгоритм) ----------
 function verifyInitData(initDataRaw) {
@@ -81,9 +93,10 @@ function verifyInitData(initDataRaw) {
 
   return { ok: true, user, params: Object.fromEntries(entries) };
 }
+
 // ---------- Роуты ----------
 
-// Healthcheck (как в шаге 1)
+// Healthcheck
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 // Авторизация/апсерт пользователя (при первом заходе мини-апки)
@@ -95,7 +108,6 @@ app.post('/api/auth/telegram', async (req, res) => {
 
     const u = check.user; // { id, username, first_name, ... }
     console.log('🔐 AUTH hit', u.id, u.username || u.first_name || '');
-
 
     // апсерт пользователя
     await User.updateOne(
@@ -126,7 +138,7 @@ app.post('/api/auth/telegram', async (req, res) => {
   }
 });
 
-// Пинг активности (будем дёргать каждые 30–60 сек из клиента)
+// Пинг активности (каждые 30 сек из клиента)
 app.post('/api/ping', async (req, res) => {
   try {
     const { initData, screen } = req.body;
@@ -139,7 +151,6 @@ app.post('/api/ping', async (req, res) => {
       { $set: { last_seen: new Date() } },
       { upsert: true }
     );
-    // просто для логов
     console.log('👀 ping', { tgId: id, screen: screen || 'unknown' });
     res.json({ status: 'ok' });
   } catch (e) {
@@ -147,16 +158,31 @@ app.post('/api/ping', async (req, res) => {
     res.status(500).json({ error: 'ping_failed' });
   }
 });
-// --- TaxiPro · stub /api/shifts (временная заглушка, без БД)
-app.post('/api/shifts', (req, res) => {
-  res.json({
-    ok: true,
-    stub: true,
-    received: req.body || null,
-    ts: Date.now()
-  });
-});
 
+// --- TaxiPro · /api/shifts (upsert в Mongo; ЗАМЕНА заглушки)
+app.post('/api/shifts', async (req, res) => {
+  try {
+    const initDataHeader = req.header('X-Telegram-Init-Data');
+    const initData = initDataHeader || req.body?.initData || '';
+    const check = verifyInitData(initData);
+    if (!check.ok) return res.status(401).json({ ok: false, error: check.error });
+
+    const tgId = Number(check.user.id);
+    const { date, payload } = req.body || {};
+    if (!date) return res.status(400).json({ ok: false, error: 'DATE_REQUIRED' });
+
+    const row = await Shift.findOneAndUpdate(
+      { tgId, date },
+      { $set: { payload: payload ?? {}, updatedAt: new Date() } },
+      { new: true, upsert: true }
+    ).lean();
+
+    return res.json({ ok: true, row });
+  } catch (e) {
+    console.error('❌ /api/shifts upsert error:', e);
+    return res.status(500).json({ ok: false, error: 'UPSERT_FAILED' });
+  }
+});
 
 // ---------- Запуск сервера ----------
 const PORT = process.env.PORT || 3000;
