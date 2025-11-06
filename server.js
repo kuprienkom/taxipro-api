@@ -4,6 +4,7 @@ import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
 import mongoose from 'mongoose';
+import './bot.js';
 
 const app = express();
 const ORIGINS = ['https://t.me', 'https://web.telegram.org', 'https://kuprienkom.github.io'];
