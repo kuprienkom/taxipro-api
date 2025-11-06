@@ -1,7 +1,7 @@
 // bot.js (ESM)
 import { Telegraf } from 'telegraf';
 
-const BOT_TOKEN   = process.env.BOT_TOKEN;
+const BOT_TOKEN    = process.env.BOT_TOKEN;
 const MINI_APP_URL = 'https://kuprienkom.github.io/taxi-pro/';
 const CHANNEL_URL  = 'https://t.me/taxipro_profit';
 const FEEDBACK_URL = 'https://t.me/your_feedback_chat';
@@ -38,6 +38,7 @@ bot.start(async (ctx) => {
       ]
     ]
   };
+
   await ctx.reply(caption, { reply_markup: keyboard });
 });
 
@@ -54,10 +55,10 @@ bot.action('faq', async (ctx) => {
   );
 });
 
-// запускаем polling и экспортируем промис запуска (на случай, если нужно ждать)
-export const botReady = bot.launch().then(() => {
-  console.log('🤖 Bot launched (polling)');
-  process.once('SIGINT', () => bot.stop('SIGINT'));
-  process.once('SIGTERM', () => bot.stop('SIGTERM'));
-});
+// ---- single launch ----
+export const botReady = bot.launch()
+  .then(() => console.log('🤖 Bot launched (polling)'))
+  .catch((e) => console.error('Bot launch error:', e));
 
+process.once('SIGINT',  () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
