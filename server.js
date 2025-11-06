@@ -6,16 +6,6 @@ import crypto from 'crypto';
 import mongoose from 'mongoose';
 
 const app = express();
-app.use(express.json({ limit: '256kb' }));
-app.use((req, _res, next) => {
-  // Короткий access-лог
-  console.log('[REQ]', req.method, req.path, {
-    query: req.query,
-    source: req.body?.source,
-  });
-  next();
-});
-
 const ORIGINS = ['https://t.me', 'https://web.telegram.org', 'https://kuprienkom.github.io'];
 
 app.use(cors({
@@ -24,6 +14,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'X-Telegram-Init-Data'],
   methods: ['GET','POST','PUT','DELETE','OPTIONS']
 }));
+app.use(express.json({ limit: '256kb' }));
 
 // ---------- MongoDB ----------
 if (!process.env.MONGODB_URI) {
@@ -165,14 +156,6 @@ app.post('/api/auth/telegram', async (req, res) => {
       { upsert: true }
     );
     await Presence.updateOne({ tgId: u.id }, { $set: { last_seen: new Date() } }, { upsert: true });
-// ВСТАВИТЬ ПЕРЕД res.json(...)
-const start_param = check.params?.start_param ?? null;
-console.log('✅ auth', {
-  tgId: u.id,
-  user: u.username || null,
-  start_param,
-  source: req.body?.source ?? null
-});
 
     res.json({ status: 'ok', userId: u.id });
   } catch (e) {
@@ -183,34 +166,18 @@ console.log('✅ auth', {
 
 app.post('/api/ping', async (req, res) => {
   try {
-    const { initData, screen, source } = req.body || {};
+    const { initData, screen } = req.body;
     const check = verifyInitData(initData);
     if (!check.ok) return res.status(403).json({ error: check.error });
-
-    const { id, username } = check.user || {};
-    const start_param = check.params?.start_param ?? null;
-
-    await Presence.updateOne(
-      { tgId: id },
-      { $set: { last_seen: new Date() } },
-      { upsert: true }
-    );
-
-    console.log('⚡ ping', {
-      tgId: id,
-      user: username || null,
-      screen: screen || 'unknown',
-      source: source ?? null,
-      start_param
-    });
-
+    const { id } = check.user;
+    await Presence.updateOne({ tgId: id }, { $set: { last_seen: new Date() } }, { upsert: true });
+    console.log('👀 ping', { tgId: id, screen: screen || 'unknown' });
     res.json({ status: 'ok' });
   } catch (e) {
     console.error('❌ /api/ping error:', e);
     res.status(500).json({ error: 'ping_failed' });
   }
 });
-
 
 // ---------- Shifts ----------
 app.post('/api/shifts', async (req, res) => {
