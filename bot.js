@@ -1,11 +1,11 @@
 // bot.js (ESM)
 import { Telegraf } from 'telegraf';
 
-const BOT_TOKEN    = process.env.BOT_TOKEN;
-const MINI_APP_URL = 'https://kuprienkom.github.io/taxi-pro/';
-const CHANNEL_URL  = 'https://t.me/taxipro_profit';
-const FEEDBACK_URL = 'https://t.me/your_feedback_chat';
-const PRIVACY_URL  = 'https://example.com/taxipro-privacy';
+const BOT_TOKEN     = process.env.BOT_TOKEN;
+const MINI_APP_URL  = 'https://kuprienkom.github.io/taxipro/'; // мини-апка
+const CHANNEL_URL   = 'https://t.me/taxipro_channel';            // новости
+const FEEDBACK_URL  = 'https://t.me/taxipro_official';           // идеи/баги (написать в ЛС/чат)
+
 
 if (!BOT_TOKEN) {
   console.warn('⚠️ BOT_TOKEN is missing — bot not started');
@@ -25,22 +25,21 @@ bot.start(async (ctx) => {
 
 Жми кнопку ниже, чтобы открыть мини-апку.`;
 
-  const keyboard = {
-    inline_keyboard: [
-      [{ text: '🚀 Открыть мини-апку', web_app: { url: MINI_APP_URL } }],
-      [
-        { text: '❓ FAQ', callback_data: 'faq' },
-        { text: '💡 Идея/баг', url: FEEDBACK_URL }
-      ],
-      [
-        { text: '📰 Новости', url: CHANNEL_URL },
-        { text: '🔒 Политика', url: PRIVACY_URL }
-      ]
+ const keyboard = {
+  inline_keyboard: [
+    [{ text: '🚀 Открыть мини-апку', web_app: { url: MINI_APP_URL } }],
+    // при желании можно добавить запасную кнопку на обычное открытие:
+    // [{ text: '🌐 Открыть в браузере', url: MINI_APP_URL }],
+    [
+      { text: '❓ FAQ', callback_data: 'faq' },
+      { text: '💡 Идея/баг', url: FEEDBACK_URL }
+    ],
+    [
+      { text: '📰 Новости', url: CHANNEL_URL }
     ]
-  };
+  ]
+};
 
-  await ctx.reply(caption, { reply_markup: keyboard });
-});
 
 // FAQ
 bot.action('faq', async (ctx) => {
