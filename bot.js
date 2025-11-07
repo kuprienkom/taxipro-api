@@ -62,28 +62,33 @@ if (bot) {
  * Настройка вебхука и подключение middleware в Express.
  * Вызывать из server.js ПЕРЕД app.listen(...).
  */
+// ЗАМЕНИТЬ содержимое setupBotWebhook целиком:
 export async function setupBotWebhook(app) {
   if (!bot) return;
 
-  const BASE_URL   = process.env.BASE_URL;              // напр. https://taxipro-api.onrender.com
-  const SECRET     = process.env.TG_WEBHOOK_SECRET;     // любой длинный секрет
-  const PATH       = '/tg/webhook';                     // локальный путь
+  const BASE_URL = process.env.BASE_URL;          // https://taxipro-api.onrender.com
+  const SECRET   = process.env.TG_WEBHOOK_SECRET; // как в Render → Environment
+  const PATH     = '/tg/webhook';
   const WEBHOOK_URL = `${BASE_URL}${PATH}`;
 
-  if (!BASE_URL)  { console.warn('⚠️ BASE_URL is not set — skip webhook'); return; }
-  if (!SECRET)    { console.warn('⚠️ TG_WEBHOOK_SECRET is not set — skip webhook'); return; }
+  if (!BASE_URL) { console.warn('⚠️ BASE_URL is not set — skip webhook'); return; }
+  if (!SECRET)   { console.warn('⚠️ TG_WEBHOOK_SECRET is not set — skip webhook'); return; }
 
-  // 1) Подключаем middleware Telegraf к Express на этом пути
-  app.use(PATH, (req, res, next) => {
-    // простая проверка секрета из Telegram
-    if (req.get('X-Telegram-Bot-Api-Secret-Token') !== SECRET) {
-      return res.sendStatus(401);
-    }
+  // 1) ЯВНО обрабатываем только POST и логируем
+  app.post(PATH, (req, res, next) => {
+    const got = req.get('X-Telegram-Bot-Api-Secret-Token') || '';
+    const ok  = got === SECRET;
+    console.log('➡️  /tg/webhook hit', { method: req.method, ok, len: (req.headers['content-length'] || '0') });
+
+    if (!ok) return res.sendStatus(401);
+
+    // прокидываем апдейт в Telegraf
     return bot.webhookCallback(PATH)(req, res, next);
+    // альтернативно: return bot.handleUpdate(req.body, res);
   });
 
-  // 2) Регистрируем вебхук у Telegram
+  // 2) Регистрируем вебхук у Telegram (с секретом)
   await bot.telegram.setWebhook(WEBHOOK_URL, { secret_token: SECRET });
-
   console.log('🤖 Webhook set:', WEBHOOK_URL);
 }
+
