@@ -4,7 +4,7 @@ import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
 import mongoose from 'mongoose';
-import './bot.js';
+import { setupBotWebhook } from './bot.js';
 
 const app = express();
 const ORIGINS = ['https://t.me', 'https://web.telegram.org', 'https://kuprienkom.github.io'];
@@ -456,6 +456,12 @@ app.get('/api/users/:tgId/summary', async (req, res) => {
 
 // ---------- Start ----------
 const PORT = process.env.PORT || 3000;
+// ВСТАВИТЬ ПЕРЕД app.listen(...)
+try {
+  await setupBotWebhook(app);
+} catch (e) {
+  console.error('Webhook setup failed:', e);
+}
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ API running on :${PORT}`);
 });
