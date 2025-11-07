@@ -1,16 +1,21 @@
-// bot.js (ESM)
+// bot.js (ESM, webhook)
 import { Telegraf } from 'telegraf';
 
-const BOT_TOKEN    = process.env.BOT_TOKEN;
-const MINI_APP_URL = 'https://kuprienkom.github.io/taxipro/'; // ← правильная ссылка
-const CHANNEL_URL  = 'https://t.me/taxipro_channel';
-const FEEDBACK_URL = 'https://t.me/taxipro_official';
+const BOT_TOKEN       = process.env.BOT_TOKEN;
+const MINI_APP_URL    = 'https://kuprienkom.github.io/taxipro/'; // правильная ссылка
+const CHANNEL_URL     = 'https://t.me/taxipro_channel';
+const FEEDBACK_URL    = 'https://t.me/taxipro_official';
 
 if (!BOT_TOKEN) {
   console.warn('⚠️ BOT_TOKEN is missing — bot not started');
-} else {
-  const bot = new Telegraf(BOT_TOKEN);
+  // ничего не запускаем (API поднимется без бота)
+}
 
+/** Экспортируемый инстанс (может понадобиться в будущем) */
+export const bot = BOT_TOKEN ? new Telegraf(BOT_TOKEN) : null;
+
+/** Роуты/хендлеры бота — подключаем только если есть токен */
+if (bot) {
   // /start
   bot.start(async (ctx) => {
     const caption =
@@ -43,20 +48,42 @@ if (!BOT_TOKEN) {
     await ctx.answerCbQuery();
     await ctx.reply(
 `FAQ — кратко:
-• Как добавить авто? Открой мини-апку → Настройки → Заполни данные авто и нажми «Добавить»
-• Как внести смену? Открой мини-апку → Главная → карточки «Доход/Расходы».
-• Как учитывается комиссия? В «Настройках» выбери режим: фикс/за заказ/процент.
-• Налог? «Самозанятый 4%» или «ИП 6%».
-• Где отчёты? Вкладка «Отчёты»: 7/30 дней, сравнение по классам.`,
+• Как добавить авто? Настройки → заполни данные авто → «Добавить».
+• Как внести смену? Главная → карточки «Доход/Расходы».
+• Комиссия парка? Настройки: фикс/за заказ/процент.
+• Налог? Самозанятый 4% или ИП 6%.
+• Отчёты? Вкладка «Отчёты»: 7/30 дней, сравнение по классам.`,
       { reply_markup: { inline_keyboard: [[{ text: '🚀 Открыть мини-апку', web_app: { url: MINI_APP_URL } }]] } }
     );
   });
+}
 
-  // запуск
-  bot.launch()
-    .then(() => console.log('🤖 Bot launched (polling)'))
-    .catch((e) => console.error('Bot launch error', e));
+/**
+ * Настройка вебхука и подключение middleware в Express.
+ * Вызывать из server.js ПЕРЕД app.listen(...).
+ */
+export async function setupBotWebhook(app) {
+  if (!bot) return;
 
-  process.once('SIGINT',  () => bot.stop('SIGINT'));
-  process.once('SIGTERM', () => bot.stop('SIGTERM'));
+  const BASE_URL   = process.env.BASE_URL;              // напр. https://taxipro-api.onrender.com
+  const SECRET     = process.env.TG_WEBHOOK_SECRET;     // любой длинный секрет
+  const PATH       = '/tg/webhook';                     // локальный путь
+  const WEBHOOK_URL = `${BASE_URL}${PATH}`;
+
+  if (!BASE_URL)  { console.warn('⚠️ BASE_URL is not set — skip webhook'); return; }
+  if (!SECRET)    { console.warn('⚠️ TG_WEBHOOK_SECRET is not set — skip webhook'); return; }
+
+  // 1) Подключаем middleware Telegraf к Express на этом пути
+  app.use(PATH, (req, res, next) => {
+    // простая проверка секрета из Telegram
+    if (req.get('X-Telegram-Bot-Api-Secret-Token') !== SECRET) {
+      return res.sendStatus(401);
+    }
+    return bot.webhookCallback(PATH)(req, res, next);
+  });
+
+  // 2) Регистрируем вебхук у Telegram
+  await bot.telegram.setWebhook(WEBHOOK_URL, { secret_token: SECRET });
+
+  console.log('🤖 Webhook set:', WEBHOOK_URL);
 }
